@@ -1,0 +1,80 @@
+#!/usr/bin/env ruby
+require 'redd'
+require 'mail'
+require 'json'
+
+def setup_email
+  @config = JSON.parse(File.read('config.json'))
+  options = { :address              => "smtp.gmail.com",
+              :port                 => 587,
+              :user_name            => @config['email']['user_email'],
+              :password             => @config['email']['user_password'],
+              :authentication       => 'plain',
+              :enable_starttls_auto => true  }
+
+
+
+  Mail.defaults do
+    delivery_method :smtp, options
+  end
+end
+
+def get_reddit_session
+  Redd.it(
+      @config['reddit']
+  )
+end
+
+def read_comments(comment)
+  good_info = []
+  author = comment.author.name
+  body = comment.body
+  interesting = @interesting_authors.include?(author)
+  @interesting_comments.each do |interesting_comment|
+    interesting = true if body.include(interesting_comment)
+  end
+  good_info.push("#{author} posted the following: #{body}") if interesting
+
+  comment_replies = comment.replies
+  comment_replies.each do |comment_reply|
+    info = read_comments(comment_reply)
+    good_info.push(*info) unless info.empty?
+  end
+
+  good_info
+end
+
+def send_email(info)
+  Mail.deliver do
+    to @config['email']['send_to_email']
+    from @config['email']['user_email']
+    subject 'WaterlooWorks info'
+    body info.join('\n')
+  end
+end
+setup_email
+session = get_reddit_session
+
+subreddit = session.subreddit('uwaterloo')
+x = subreddit.hot
+thread = nil
+send_email('')
+@interesting_authors = Set.new(%w(titem88 removebaklava))
+@interesting_comments = Set.new(%w(yahoo a9))
+x.each do |post|
+  if post.title == 'WaterlooWorks Megathread'
+    thread = post
+  end
+end
+
+read = Set.new
+while true
+  first_comment = thread.comments.first
+  if read.include?(first_comment.id)
+    next
+  end
+  read.add(first_comment.id)
+  info = read_comments(first_comment)
+  send_email(info) unless info.empty?
+  sleep(5000)
+end
